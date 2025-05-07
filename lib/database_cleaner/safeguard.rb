@@ -22,7 +22,27 @@ module DatabaseCleaner
       end
     end
 
-    class AllowedUrl
+    # Base class for adapters to implement safeguards
+    #
+    class Base
+      def run
+        raise NotImplementedError
+      end
+
+      def self.inherited(subclass)
+        DatabaseCleaner::Safeguard.registry << subclass
+        DatabaseCleaner::Safeguard.deprecated_registry.reject! do |const|
+          subclass.name.split("::").last == const.name.split("::").last
+        end
+      end
+    end
+
+    # Just a marker class for safeguards implemented by core
+    # Kept to maintain backwards compatibility
+    #
+    class Deprecated; end
+
+    class AllowedUrl < Deprecated
       def run
         return if skip?
         raise Error::UrlNotAllowed if database_url_not_allowed?
@@ -39,8 +59,7 @@ module DatabaseCleaner
         end
     end
 
-
-    class RemoteDatabaseUrl
+    class RemoteDatabaseUrl < Deprecated
       LOCAL = %w(localhost 127.0.0.1)
 
       def run
@@ -73,7 +92,7 @@ module DatabaseCleaner
         end
     end
 
-    class Production
+    class Production < Deprecated
       KEYS = %w(ENV APP_ENV RACK_ENV RAILS_ENV)
 
       def run
@@ -96,14 +115,30 @@ module DatabaseCleaner
         end
     end
 
-    CHECKS = [
+    def run
+      self.class.registry.each { |const| const.new.run }
+      self.class.deprecated_registry.each { |const| const.new.run }
+    end
+
+    @registry = []
+    @deprecated_registry = [
       RemoteDatabaseUrl,
       Production,
       AllowedUrl
     ]
 
-    def run
-      CHECKS.each { |const| const.new.run }
+    class << self
+      attr_reader :registry
+      attr_reader :deprecated_registry
+
+      def reset_registry!
+        @registry = []
+        @deprecated_registry = [
+          RemoteDatabaseUrl,
+          Production,
+          AllowedUrl
+        ]
+      end
     end
   end
 end
